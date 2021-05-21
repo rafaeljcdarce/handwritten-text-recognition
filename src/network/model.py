@@ -20,8 +20,8 @@ from tensorflow.keras.callbacks import CSVLogger, TensorBoard, ModelCheckpoint
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.constraints import MaxNorm
 
-from network.layers import FullGatedConv2D, GatedConv2D, OctConv2D
-from tensorflow.keras.layers import Conv2D, Bidirectional, LSTM, GRU, Dense
+from network.layers import FullGatedConv2D, GatedConv2D, OctConv2D, MultiHeadAttention, FeedForwardNetwork
+from tensorflow.keras.layers import Conv2D, Bidirectional, LSTM, GRU, Dense, LayerNormalization
 from tensorflow.keras.layers import Dropout, BatchNormalization, LeakyReLU, PReLU
 from tensorflow.keras.layers import Input, Add, Activation, Lambda, MaxPooling2D, Reshape
 
@@ -574,3 +574,62 @@ def _create_octconv_last_block(inputs, ch, alpha):
     x = Activation("relu")(x)
 
     return x
+
+def sanscript(input_size, d_model):
+
+    N = 4
+    H = 4
+    D = 192
+    F = 512
+    R = 0.1
+
+
+    input_data = Input(name="input", shape=input_size)
+
+    cnn = Conv2D(filters=16, kernel_size=(3, 3), strides=(1, 1), padding="same")(input_data)
+    cnn = BatchNormalization()(cnn)
+    cnn = LeakyReLU(alpha=0.01)(cnn)
+    cnn = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="valid")(cnn)
+
+    cnn = Conv2D(filters=32, kernel_size=(3, 3), strides=(1, 1), padding="same")(cnn)
+    cnn = BatchNormalization()(cnn)
+    cnn = LeakyReLU(alpha=0.01)(cnn)
+    cnn = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="valid")(cnn)
+
+    cnn = Dropout(rate=0.2)(cnn)
+    cnn = Conv2D(filters=48, kernel_size=(3, 3), strides=(1, 1), padding="same")(cnn)
+    cnn = BatchNormalization()(cnn)
+    cnn = LeakyReLU(alpha=0.01)(cnn)
+    cnn = MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="valid")(cnn)
+
+    cnn = Dropout(rate=0.2)(cnn)
+    cnn = Conv2D(filters=64, kernel_size=(3, 3), strides=(1, 1), padding="same")(cnn)
+    cnn = BatchNormalization()(cnn)
+    cnn = LeakyReLU(alpha=0.01)(cnn)
+
+    cnn = Dropout(rate=0.2)(cnn)
+    cnn = Conv2D(filters=80, kernel_size=(3, 3), strides=(1, 1), padding="same")(cnn)
+    cnn = BatchNormalization()(cnn)
+    cnn = LeakyReLU(alpha=0.01)(cnn)
+
+    shape = cnn.get_shape()
+    san = Reshape((shape[1], shape[2] * shape[3]))(cnn)
+
+    san = Dense(D)(san)
+
+    san = Dropout(D)(san)
+
+    for n in range(N):
+
+        attn_output, attn_weights = MultiHeadAttention(D, H)(san, san, san)
+        attn_output = Dropout(R)(attn_output)
+        san = LayerNormalization(epsilon=1e-6)(san + attn_output)
+
+        ffn_output = FeedForwardNetwork(D, F)(san)
+        ffn_output = Dropout(R)(ffn_output)
+        san = LayerNormalization(epsilon=1e-6)(san + ffn_output)
+
+    san = Dropout(R)(san)
+    output_data = Dense(d_model, activation="softmax")(san)
+
+    return (input_data, output_data)

@@ -6,7 +6,7 @@ Gated implementations
 """
 
 from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Layer, Conv2D, Multiply, Activation
+from tensorflow.keras.layers import Layer, Conv2D, Multiply, Activation, Dense
 
 """
 Tensorflow Keras layer implementation of the gated convolution.
@@ -228,3 +228,82 @@ class OctConv2D(Layer):
             "kernel_constraint": self.kernel_constraint,
         }
         return out_config
+
+"""
+Tensorflow Keras layer implementation of the Transformer Feed Foward Network and Multi-Head Attention.
+
+    Reference (based):
+        Y. N. Dauphin, A. Fan, M. Auli, and D. Grangier,
+        Language modeling with gated convolutional networks, in
+        Proc. 34th Int. Conf. Mach. Learn. (ICML), vol. 70,
+        Sydney, Australia, pp. 933–941, 2017.
+
+        A. Vaswani et al.
+        Attention Is All You Need
+        ArXiv:1706.03762 [Cs], Dec. 2017. arXiv.org, http://arxiv.org/abs/1706.03762.s
+
+        https://www.tensorflow.org/tutorials/text/transformer
+"""
+def ScaledDotProductAttention(q, k, v, mask=None):
+
+  matmul_qk = tf.matmul(q, k, transpose_b=True)
+
+  dk = tf.cast(tf.shape(k)[-1], tf.float32)
+  logits = matmul_qk / tf.math.sqrt(dk)
+
+  if mask is not None:
+    logits += (mask * -1e9)  
+
+  weights = tf.nn.softmax(logits, axis=-1)
+
+  attention = tf.matmul(weights, v)
+
+  return attention, weights
+
+class MultiHeadAttention(tf.keras.layers.Layer):
+    def __init__(self, D, H):
+        super(MultiHeadAttention, self).__init__()
+        self.h = H
+        self.d = D
+        self.dh = D // H
+
+        self.wq = tf.keras.layers.Dense(D)
+        self.wk = tf.keras.layers.Dense(D)
+        self.wv = tf.keras.layers.Dense(D)
+
+        self.dense = Dense(D)
+
+    def call(self, v, k, q, mask=None):
+
+        batch_size = tf.shape(q)[0]
+
+        q = self.wq(q) 
+        k = self.wk(k) 
+        v = self.wv(v) 
+
+        q = self.split_heads(q, batch_size) 
+        k = self.split_heads(k, batch_size) 
+        v = self.split_heads(v, batch_size)  
+
+        attention, weights = ScaledDotProductAttention(q, k, v, mask)
+
+        attention = tf.transpose(attention, perm=[0, 2, 1, 3])
+
+        concat = tf.reshape(attention, (batch_size, -1, self.d))
+
+        output = self.dense(concat)
+
+        return output, weights
+
+    def split_heads(self, x, batch_size):   
+        x = tf.reshape(x, (batch_size, -1, self.h, self.dh))
+        return tf.transpose(x, perm=[0, 2, 1, 3])
+
+
+def FeedForwardNetwork(D, F):
+    return tf.keras.Sequential([
+        Dense(F, activation='relu'),
+        Dense(D)
+    ])
+
+
